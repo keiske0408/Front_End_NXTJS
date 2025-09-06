@@ -1,0 +1,184 @@
+import { NextRouter, useRouter as useNextRouter } from "next/router";
+import qs, { ParsedQuery } from "query-string";
+import { useEffect, useMemo, useState } from "react";
+ 
+type StaticRoutes = Record<"home" | "about", string>;
+ 
+type TransitionOptions = ArgumentTypes<NextRouter["push"]>[2];
+type PathFromRoutes = (routes: StaticRoutes) => string;
+ 
+type PathParameters = {
+  url: string | PathFromRoutes;
+  query?: ParsedQuery<any>;
+};
+ 
+export const STATIC_ROUTES: StaticRoutes = {
+  home: "/",
+  about: "/about",
+};
+ 
+const ROUTE_TITLES: Record<string, string> = {
+  "/": "Home",
+  "/about": "About",
+};
+ 
+export const useRouter = () => {
+  const router = useNextRouter();
+  const [loading, setLoading] = useState(false);
+  const staticRoutes = {} as StaticRoutes;
+ 
+  useEffect(() => {
+    const start = () => {
+      setLoading(true);
+    };
+    const end = () => {
+      setLoading(false);
+    };
+ 
+    router.events.on("routeChangeStart", start);
+    router.events.on("routeChangeComplete", end);
+    router.events.on("routeChangeError", end);
+ 
+    return () => {
+      router.events.off("routeChangeStart", start);
+      router.events.off("routeChangeComplete", end);
+      router.events.off("routeChangeError", end);
+    };
+  }, [router]);
+ 
+  return {
+    loading,
+    staticRoutes: STATIC_ROUTES,
+    title: ROUTE_TITLES[router.pathname],
+    ...useMemo(
+      () => ({
+        ...router,
+        push: navigate(push),
+        replace: navigate(replace),
+        openInNewTab,
+      }),
+      [router, staticRoutes]
+    ),
+  };
+ 
+  async function push(
+    path: string | PathFromRoutes | { pathname: string },
+    options?: TransitionOptions
+  ) {
+    if (typeof path === "string") {
+      return router.push(routeUrl(path), path, configuredRouteOptions(options));
+    } else if (typeof path === "function") {
+      const resolvedPath = path(STATIC_ROUTES);
+      return router.push(
+        routeUrl(resolvedPath),
+        resolvedPath,
+        configuredRouteOptions(options)
+      );
+    } else {
+      return router.push(
+        routeUrl(path.pathname),
+        path.pathname,
+        configuredRouteOptions(options)
+      );
+    }
+  }
+ 
+  async function replace(
+    path: string | PathFromRoutes | { pathname: string },
+    options?: TransitionOptions
+  ) {
+    if (typeof path === "string") {
+      return router.replace(
+        routeUrl(path),
+        path,
+        configuredRouteOptions(options)
+      );
+    } else if (typeof path === "function") {
+      const resolvedPath = path(STATIC_ROUTES);
+      return router.replace(
+        routeUrl(resolvedPath),
+        resolvedPath,
+        configuredRouteOptions(options)
+      );
+    } else {
+      return router.replace(
+        routeUrl(path.pathname),
+        path.pathname,
+        configuredRouteOptions(options)
+      );
+    }
+  }
+ 
+  function navigate(
+    fn: (
+      path: string | PathFromRoutes | { pathname: string },
+      options?: TransitionOptions
+    ) => Promise<boolean>
+  ) {
+    return async (
+      path: string | PathFromRoutes | PathParameters | { pathname: string },
+      options?: TransitionOptions
+    ) => {
+      setLoading(true);
+      if (typeof path === "string" || typeof path === "function") {
+        return await fn(path, options);
+      }
+ 
+      if (typeof path === "object" && "pathname" in path) {
+        return await fn(path.pathname, options);
+      }
+ 
+      try {
+        const stringified = qs.stringifyUrl({
+          url:
+            typeof path.url === "string" ? path.url : path.url(STATIC_ROUTES),
+          query: path.query,
+        });
+ 
+        return await fn(stringified, options);
+      } catch (e) {
+        console.error(e);
+        return false;
+      }
+    };
+  }
+};
+ 
+function openInNewTab(path: string | PathFromRoutes | { pathname: string }) {
+  let resolvedPath: string;
+ 
+  if (typeof path === "string") {
+    resolvedPath = routeUrl(path);
+  } else if (typeof path === "function") {
+    resolvedPath = path(STATIC_ROUTES);
+  } else if (path && typeof path === "object" && "pathname" in path) {
+    resolvedPath = routeUrl(path.pathname);
+  } else {
+    throw new Error("Invalid path type for openInNewTab");
+  }
+ 
+  window.open(resolvedPath, "_blank");
+}
+ 
+export function routeUrl(path: string) {
+  return path === STATIC_ROUTES.home ||
+    path.includes("http://") ||
+    path.includes("https://")
+    ? path
+    : path;
+}
+ 
+export const configuredRouteOptions = (options?: TransitionOptions) =>
+  options ? { scroll: true, ...options } : { scroll: true };
+ 
+/**
+ * basic -> useRouter();
+ * router.push('/') -> about.tsx -> router.push('/about')
+ *
+ * intermediate routing
+ * router.push(router => router.home)
+ *
+ * https://example.com/careers
+ *
+ * static & dynamic
+ */
