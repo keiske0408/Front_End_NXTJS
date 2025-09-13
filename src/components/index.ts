@@ -1,2 +1,2 @@
 export * from './Link'
-export * from "./Button/Button"
+export * from "./Buttons/Button"
